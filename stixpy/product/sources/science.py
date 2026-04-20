@@ -17,6 +17,8 @@ from sunpy.util import deprecated
 
 from stixpy.io.readers import read_subc_params
 from stixpy.product.product import L1Product
+from stixpy.config.instrument import STIX_INSTRUMENT
+from stixpy.calibration.livetime import get_livetime_fraction
 
 __all__ = [
     "ScienceData",
@@ -466,6 +468,7 @@ class ScienceData(L1Product):
         detector_indices=None,
         pixel_indices=None,
         sum_all_times=False,
+        livetime_correction=True
     ):
         r"""
         Return the counts, errors, times, durations and energies for selected data.
@@ -510,6 +513,8 @@ class ScienceData(L1Product):
         except KeyError:
             counts_var = self.data["counts_comp_comp_err"] ** 2
         shape = counts.shape
+
+
         if len(shape) < 4:
             counts = counts.reshape(shape[0], 1, 1, shape[-1])
             counts_var = counts_var.reshape(shape[0], 1, 1, shape[-1])
@@ -617,12 +622,34 @@ class ScienceData(L1Product):
 
         t_norm = t_norm.to("s")
 
+        if livetime_correction:
+
+            trigger_to_detector = STIX_INSTRUMENT.subcol_adc_mapping
+            triggers = self.data["triggers"][:, trigger_to_detector].astype(float)[...]
+            
+            triggers_error = self.data["triggers_comp_err"][:, trigger_to_detector].astype(float)[...]
+            triggers_lower = triggers - triggers_error
+            triggers_upper = triggers + triggers_error            
+             
+            _, livefrac, _ = get_livetime_fraction(triggers/ t_norm.reshape(-1, 1))
+            _, livefrac_lower, _ = get_livetime_fraction(triggers_lower/ t_norm.reshape(-1, 1))
+            _, livefrac_upper, _ = get_livetime_fraction(triggers_upper/ t_norm.reshape(-1, 1))
+
+            t_norm = t_norm * livefrac
+            t_norm_lower = t_norm * livefrac_lower
+            t_norm_upper = t_norm * livefrac_upper        
+
+
         if e_norm.size != 1:
             e_norm = e_norm.reshape(1, 1, 1, -1)
 
         if t_norm.size != 1:
             t_norm = t_norm.reshape(-1, 1, 1, 1).to("s")
 
+            if livetime_correction:
+                t_norm_lower = t_norm_lower.reshape(-1, 1, 1, 1).to("s")
+                t_norm_upper = t_norm_upper.reshape(-1, 1, 1, 1).to("s")
+        
         if vtype == "c":
             norm = 1
         elif vtype == "cr":
@@ -632,7 +659,21 @@ class ScienceData(L1Product):
         else:
             raise ValueError("vtype must be one of 'c', 'cr', 'dcr'.")
 
-        counts_err = np.sqrt(counts * u.ct + counts_var) * norm
+        if livetime_correction:
+            counts_lower = counts / (t_norm_lower)
+            counts_upper = counts / (t_norm_upper)
+            livetime_error = (counts_upper - counts_lower)  / 2
+
+            if vtype == "c":
+                counts_err = np.sqrt(counts * u.ct + counts_var) * norm
+            if  vtype == "cr":
+                counts_err = np.sqrt(((counts_err/t_norm)**2) + (livetime_error**2))
+            elif vtype == "cr":
+                counts_err = np.sqrt(((counts_err/t_norm)**2) + (livetime_error**2)) / e_norm
+
+        else:        
+            counts_err = np.sqrt(counts * u.ct + counts_var) * norm
+        
         counts = counts * norm
 
         return counts, counts_err, times, t_norm, energies
