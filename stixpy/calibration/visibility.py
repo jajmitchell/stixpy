@@ -1,16 +1,17 @@
 from types import SimpleNamespace
-from typing import Union
 from pathlib import Path
 
-import astropy.units as u
 import numpy as np
+from xrayvision.visibility import Visibilities, VisMeta
+
+import astropy.units as u
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from astropy.time import Time
 from astropy.units import Quantity
+
 from sunpy.coordinates import HeliographicStonyhurst
 from sunpy.time import TimeRange
-from xrayvision.visibility import Visibilities, VisMeta
 
 from stixpy.calibration.energy import get_elut
 from stixpy.calibration.grid import get_grid_transmission
@@ -127,7 +128,7 @@ def get_subcollimator_info():
 
 @u.quantity_input
 def create_meta_pixels(
-    pixel_data: Union[RawPixelData, CompressedPixelData, SummedCompressedPixelData],
+    pixel_data: RawPixelData | CompressedPixelData | SummedCompressedPixelData,
     time_range: Time,
     energy_range: Quantity["energy"],  # noqa: F821
     flare_location: SkyCoord | None = None,
@@ -197,7 +198,7 @@ def create_meta_pixels(
     # Map the triggers to all 32 detectors
     triggers = pixel_data.data["triggers"][:, trigger_to_detector].astype(float)[...]
 
-    _, livefrac, _ = get_livetime_fraction(triggers / pixel_data.data["timedel"].to("s").reshape(-1, 1))
+    livefrac, *_ = get_livetime_fraction(triggers / pixel_data.data["timedel"].to("s").reshape(-1, 1))
 
     pixel_data.data["livefrac"] = livefrac
 
@@ -360,7 +361,9 @@ def create_visibility(meta_pixels):
     return vis
 
 
-def calibrate_visibility(vis: Visibilities, flare_location: SkyCoord = STIXImaging(0 * u.arcsec, 0 * u.arcsec)):
+def calibrate_visibility(
+    vis: Visibilities, flare_location: SkyCoord = SkyCoord(0 * u.arcsec, 0 * u.arcsec, frame=STIXImaging)
+):
     """
     Calibrate visibility phase and amplitudes.
 
@@ -390,6 +393,8 @@ def calibrate_visibility(vis: Visibilities, flare_location: SkyCoord = STIXImagi
 
     tr = TimeRange(vis.meta.time_range)
 
+    if not isinstance(flare_location, SkyCoord):
+        raise ValueError("'flare_location' is not a SkyCoord object")
     if not isinstance(flare_location.frame, STIXImaging) or flare_location.obstime != tr.center:
         roll, solo_heeq, stix_pointing = get_hpc_info(vis.meta.time_range[0], vis.meta.time_range[1])
         solo_coord = HeliographicStonyhurst(solo_heeq, representation_type="cartesian", obstime=tr.center)
