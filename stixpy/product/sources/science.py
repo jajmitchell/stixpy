@@ -1477,10 +1477,16 @@ class ScienceData(L1Product):
 
     def get_masked_srm(self,flare_location):
 
-        PATH_DRM = '/home/jmitchell/software/stixpy-dev/stixpy/config/data/detector/'
-        drm = np.load(PATH_DRM+'stx_drm_energy.npz')["data"]
-        ph_energies = np.load(PATH_DRM+'stx_ph_edges.npy')
-        ct_energies = np.load(PATH_DRM+'stx_ct_edges.npy')
+        HERE = Path(__file__).parent          # .../your_package/product/sources/
+        ROOT = HERE.parent.parent             # .../your_package/
+        PATH_DRM = ROOT / "config" / "data" / "detector" / 'stx_drm_energy.npz'
+        PATH_PHE = ROOT / "config" / "data" / "detector" / 'stx_ph_edges.npy'
+        PATH_CTE = ROOT / "config" / "data" / "detector" / 'stx_ct_edges.npy'
+
+        # PATH_DRM = '/home/jmitchell/software/stixpy-dev/stixpy/config/data/detector/'
+        drm = np.load(PATH_DRM)["data"]
+        ph_energies = np.load(PATH_PHE)
+        ct_energies = np.load(PATH_CTE)
         
         # max_stix = estimate_flare_location(self,time_range)
 
