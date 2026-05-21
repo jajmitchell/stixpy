@@ -17,6 +17,9 @@ from matplotlib.widgets import Slider
 from sunpy.time.timerange import TimeRange
 from datetime import timedelta
 
+from stixpy.coordinates.transforms import get_hpc_info
+from stixpy.coordinates.flare_angle import flare_spacecraft_angle
+from sunpy.coordinates import HeliographicStonyhurst, Helioprojective
 
 from sunkit_spex.spectrum.spectrum import Spectrum, SpectralAxis
 from sunkit_spex.spectrum.uncertainty import PoissonUncertainty
@@ -1288,7 +1291,7 @@ class ScienceData(L1Product):
         return data_dictionary    
 
 
-    def get_spec_obj(self,event_time_range,flare_angle,srm_dictionary=None,bkg_data=None,flare_location=None):
+    def get_spec_obj(self,event_time_range,srm_dictionary=None,bkg_data=None,flare_location=None):
 
 
         if not bkg_data:
@@ -1375,6 +1378,9 @@ class ScienceData(L1Product):
 
         distance = (self.meta['DSUN_OBS'] * u.m).to(u.AU) 
 
+        flare_angle = self._flare_angle(self,flare_location)
+
+
         meta = NDMeta()
 
         # meta.add("exposure_time", np.sum(t_norm))
@@ -1411,7 +1417,7 @@ class ScienceData(L1Product):
         meta.add("exposure_time", np.sum(t_norm))
         meta.add("geo_area", srm_dict['geo_area'])
         meta.add("date-obs",  data_dict['times'])
-        meta.add("angle",flare_angle*u.deg)
+        meta.add("angle",flare_angle)
         meta.add("distance",distance)
         meta.add("srm",srm_trim)
         meta.add("ph_axis",ph_energies_trim*u.keV)
@@ -1422,6 +1428,19 @@ class ScienceData(L1Product):
         return spec_1d
 
 # NEED TO ADD IN THE DIST AND ANGLE READING AND BKG_SUBTRACT, GETTING THERE THOUGH!!!
+
+    @staticmethod
+    def _flare_angle(product, flare_location):
+        
+        roll, solo_xyz, pointing = get_hpc_info(product.time_range.start, product.time_range.start)
+
+        solo = HeliographicStonyhurst(*solo_xyz, obstime=product.time_range.center, representation_type="cartesian")
+        # flare = SkyCoord(1000*u.arcsec, -1388.43*u.arcsec, frame=Helioprojective(obstime=spec_prod.time_range.center, observer=solo))
+
+        flare_angle = flare_spacecraft_angle(solo,flare_location['hpc'])
+
+        return flare_angle
+
 
     def bkg_subtract(self, bkg_data):
 
@@ -1476,6 +1495,8 @@ class ScienceData(L1Product):
         return spec_sub
 
     def get_masked_srm(self,flare_location):
+
+        flare_location = np.array([flare_location['stx'].Tx.value, flare_location['stx'].Ty.value])
 
         HERE = Path(__file__).parent          # .../your_package/product/sources/
         ROOT = HERE.parent.parent             # .../your_package/
