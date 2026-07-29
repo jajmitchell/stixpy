@@ -1505,6 +1505,15 @@ class ScienceData(L1Product):
 
                 detector_indices_srm, pixel_indices_srm = ScienceData._srm_det_pix_indices_format(detector_indices, pixel_indices, case)
 
+                # An SRM can only be calculated if the attenutator does not move.
+                # Therefore ensure that rcr_unique is an int.
+                if len(rcr_unique) > 2:
+                    raise ValueError(
+                        "Calculating an SRM over a change in a STIX RCR state is not supported."
+                        )
+                elif len(rcr_unique) == 1:
+                    rcr_unique = rcr_unique[0]
+                rcr_unique = int(rcr_unique)
                 srm_dict = product.get_masked_srm(flare_location=flare_location_stx,
                                             detector_indices_input=detector_indices_srm, 
                                             pixel_indices_input=pixel_indices_srm,
@@ -2515,6 +2524,8 @@ class ScienceData(L1Product):
             total collecting area.
         pixel_indices_input : list or numpy.ndarray
             Pixel indices to include when computing the total collecting area.
+        rcr : `int`
+            The attenuator state in the range 0--7 inclusive.
 
         Returns
         -------
@@ -2525,6 +2536,8 @@ class ScienceData(L1Product):
                 - "geo_area": the total geometric area (cm^2) for the selected
                 detectors and pixels.
         """
+        # Ensure rcr is an int.
+        rcr = int(rcr)
 
         HERE = Path(__file__).parent          
         ROOT = HERE.parent.parent            
@@ -2595,7 +2608,7 @@ class ScienceData(L1Product):
         rcr_state_all = np.array([0.8096, 0.80961, 0.4048, 0.2024, 0.1012, 0.0396, 0.0198, 0.0099])
         pixel_indices_input_rcr = np.arange(0,12,1)
 
-        rcr_state = rcr_state_all[int(rcr)]  
+        rcr_state = rcr_state_all[rcr]  
         rcr_factor = rcr_state / np.sum(pixel_areas_full[pixel_indices_input_rcr].value)
 
         attenuation = np.zeros(len(tot_trans["det-1"]))
