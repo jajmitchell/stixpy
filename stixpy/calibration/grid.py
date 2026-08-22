@@ -105,6 +105,10 @@ def get_grid_transmission(ph_energy, detectors, flare_location: STIXImaging):
     nominal_transmission = Table.read(
         grid_info / "nom_grid_transmission.txt", format="ascii.no_header", comment="[;~]"
     )["col1"]
+
+    nominal_transmission_bkg = Table.read(
+        grid_info / "nom_bkg_grid_transmission.txt", format="ascii.no_header", comment="[;~]"
+    )["col1"]
  
     # Current calibration table (post-March-2026 update): 6 columns, of which
     # IDL uses subc_n, subc_label, intercept, slope[1/deg] (skipping the two
@@ -143,7 +147,7 @@ def get_grid_transmission(ph_energy, detectors, flare_location: STIXImaging):
  
         if det in CFL_BKG_0:
             # No physical grid: report the flat nominal value, same as before.
-            subc_transm[:, j] = nominal_transmission[det]
+            subc_transm[:, j] = nominal_transmission_bkg[det]
             continue
  
         idx_front = np.where(front["sc"] == sc_num)[0]

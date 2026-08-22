@@ -651,9 +651,10 @@ class ScienceData(L1Product):
         new_livefrac = livefrac.copy()
         for g in groups:
             g = np.atleast_1d(np.asarray(g))
-            num = np.nansum(counts[:, g, :, :], axis=(1, 2, 3), keepdims=True)
-            den = np.nansum(counts_corr[:, g, :, :], axis=(1, 2, 3), keepdims=True)
-            eff_lt = num / den                              # scalar per time bin
+            # num = np.nansum(counts[:, g, :, :], axis=(1, 2, 3), keepdims=True)
+            # den = np.nansum(counts_corr[:, g, :, :], axis=(1, 2, 3), keepdims=True)
+            # eff_lt = num / den
+            eff_lt = np.nanmean(livefrac[:, g, :, :],axis=1,keepdims=True)                          # scalar per time bin
             counts_out[:, g, :, :] = counts_corr[:, g, :, :] * eff_lt
             counts_var_out[:, g, :, :] = counts_var_corr[:, g, :, :] * eff_lt
             new_livefrac[:, g, :, :] = np.broadcast_to(eff_lt, new_livefrac[:, g, :, :].shape)
@@ -1126,17 +1127,19 @@ class ScienceData(L1Product):
         t_norm = t_norm.to(u.s)
         t_norm_bkg = t_norm_bkg.to(u.s)
 
-        print('counts sss = ',np.shape(counts[...,:]))
-        print('counts sss = ',np.shape(counts_bkg[...,:]))
-        print('elut sss = ',np.shape(elut_cor_fac))
+        if elut_cor_fac is not None:
+            counts_uncorr = counts * elut_cor_fac
+            counts_lvtcorr = (counts * elut_cor_fac) / livefrac
+        else:
+            counts_uncorr = counts 
+            counts_lvtcorr = (counts) / livefrac            
 
-        counts_uncorr = counts * elut_cor_fac
-        counts_lvtcorr = (counts * elut_cor_fac) / livefrac
-
-    
-
-        counts_uncorr_bkg = counts_bkg * elut_cor_fac
-        counts_lvtcorr_bkg = (counts_bkg / livefrac_bkg) * elut_cor_fac
+        if elut_cor_fac is not None:
+            counts_uncorr_bkg = counts_bkg * elut_cor_fac
+            counts_lvtcorr_bkg = (counts_bkg / livefrac_bkg) * elut_cor_fac
+        else:
+            counts_uncorr_bkg = counts_bkg 
+            counts_lvtcorr_bkg = (counts_bkg / livefrac_bkg)             
 
         count_rate_uncorr_bkg = counts_uncorr_bkg  / t_norm_bkg.mean()
         count_uncorr_scaled_bkg = t_norm.reshape(len(t_norm), 1,1,1) * count_rate_uncorr_bkg
@@ -1145,8 +1148,13 @@ class ScienceData(L1Product):
         count_rate_lvtcorr_bkg = counts_lvtcorr_bkg / t_norm_bkg.mean()
         count_lvtcorr_scaled_bkg = t_norm.reshape(len(t_norm), 1,1,1) * count_rate_lvtcorr_bkg
 
-        counts_var_lvtcorr = (counts_var * elut_cor_fac) / livefrac
-        counts_var_lvtcorr_bkg = (counts_var_bkg / livefrac_bkg) * elut_cor_fac
+        if elut_cor_fac is not None:
+            counts_var_lvtcorr = (counts_var * elut_cor_fac) / livefrac
+            counts_var_lvtcorr_bkg = (counts_var_bkg / livefrac_bkg) * elut_cor_fac
+        else:
+             counts_var_lvtcorr = (counts_var) / livefrac
+             counts_var_lvtcorr_bkg = (counts_var_bkg / livefrac_bkg)         
+
         counts_var_lvtcorr_scaled_bkg = (counts_var_lvtcorr_bkg / t_norm_bkg.mean()) * t_norm.reshape(len(t_norm), 1,1,1)
 
         spec_in_corr = counts_lvtcorr - count_lvtcorr_scaled_bkg
@@ -1165,7 +1173,9 @@ class ScienceData(L1Product):
             spec_in_err = spec_in_err[..., 1:]
             energies = energies[1:]
             e_norm = e_norm[1:]
-            elut_cor_fac = elut_cor_fac[1:]
+            if elut_cor_fac is not None:
+                elut_cor_fac = elut_cor_fac[1:]
+
 
         if np.isnan(energies["e_high"][-1].value):
             spec_in = spec_in[..., :-1]
@@ -1175,7 +1185,8 @@ class ScienceData(L1Product):
             spec_in_err = spec_in_err[..., :-1]
             energies = energies[:-1]            
             e_norm = e_norm[:-1]
-            elut_cor_fac = elut_cor_fac[:-1]
+            if elut_cor_fac is not None:
+                elut_cor_fac = elut_cor_fac[:-1]
 
 
         # eff_livefrac = np.nansum(spec_in_lvt,axis=(3)) /  np.nansum(spec_in_corr_lvt,axis=(3)) 
@@ -1207,12 +1218,13 @@ class ScienceData(L1Product):
 
             idx = np.ix_(detector_indices, pixel_indices)
 
-            eff_livefrac= np.nansum(spec_in_lvt[:, idx[0], idx[1], :], axis=(1, 2, 3), keepdims=True) / np.nansum(spec_in_corr_lvt[:, idx[0], idx[1], :], axis=(1, 2, 3), keepdims=True)
+
+            # eff_livefrac= np.nansum(spec_in_lvt[:, idx[0], idx[1], :], axis=(1, 2, 3), keepdims=True) / np.nansum(spec_in_corr_lvt[:, idx[0], idx[1], :], axis=(1, 2, 3), keepdims=True)
             
-            
+            eff_livefrac = np.nanmean(livefrac[:, detector_indices, :, :],axis=1,keepdims=True)
+
             spec_in_final = spec_in_corr * eff_livefrac
             spec_in_err_final = spec_in_err * eff_livefrac
-
 
             counts = spec_in_final
 
@@ -1221,10 +1233,11 @@ class ScienceData(L1Product):
             # spec_in_err_final = np.where(counts_check < 0, 0, spec_in_err_final)
 
             # print('err shape = ',spec_in_err_final[:, idx[0], idx[1], :].shape)
-            err_f = spec_in_err_final[:, idx[0], idx[1], :]
+            # err_f = spec_in_err_final[:, idx[0], idx[1], :]
             # np.save('err_check.npy',np.array(np.sqrt(np.nansum(err_f[165:174]**2,axis=(0,1,2)))))
 
             counts_var = spec_in_err_final
+            # counts_var = err_f
             livefrac =  np.broadcast_to(eff_livefrac, counts.shape)
 
             # idx = np.ix_(detector_indices, pixel_indices)
@@ -1509,13 +1522,15 @@ class ScienceData(L1Product):
             counts = counts[..., 1:]
             counts_uncertainity = counts_uncertainity[..., 1:]
             energies = energies[1:]
-            elut_cor_fac = elut_cor_fac[1:]
+            if elut_cor_fac is not None:
+                elut_cor_fac = elut_cor_fac[1:]
 
         if np.isnan(energies["e_high"][-1].value):
             counts = counts[...,:-1]
             counts_uncertainity = counts_uncertainity[...,:-1]
             energies = energies[:-1]
-            elut_cor_fac = elut_cor_fac[:-1]
+            if elut_cor_fac is not None:
+                elut_cor_fac = elut_cor_fac[:-1]
 
 
         counts_axis = np.concatenate([energies["e_low"], [energies["e_high"][-1]]])
@@ -2731,7 +2746,7 @@ class ScienceData(L1Product):
 
         if bkg:
             livetime_correction = True
-            elut_correction = True
+            # elut_correction = True
 
         if livetime_correction:
 
@@ -2931,10 +2946,12 @@ class ScienceData(L1Product):
         HERE = Path(__file__).parent          
         ROOT = HERE.parent.parent            
         PATH_DRM = ROOT / "config" / "data" / "detector" / 'stx_detector_response_matrix.fits.gz'
+        PATH_BKG_TRANS = ROOT / "config" / "data" / "grid" / 'real_bkg_grid_transmission.txt'
 
         drm = np.array(Table.read(PATH_DRM,hdu=1)['DRM'])
         ph_energies = np.array(Table.read(PATH_DRM,hdu=2)['DRM'])
         ct_energies = np.array(Table.read(PATH_DRM,hdu=3)['DRM'])
+        bkg_transmission = Table.read(PATH_BKG_TRANS, format="ascii.no_header", comment="[;~]")["col1"]
     
         energies = self.energies
         # energy_masks = self.energy_masks.energy_mask
@@ -3004,6 +3021,8 @@ class ScienceData(L1Product):
             tot_trans = trans.get_transmission(energies=e_mids * u.keV,
                                                 attenuator=True)     
 
+        print('TOTTRANS = ',tot_trans)
+
         rcr_state_all = np.array([0.8096, 0.80961, 0.4048, 0.2024, 0.1012, 0.0396, 0.0198, 0.0099])
         pixel_indices_input_rcr = np.arange(0,12,1)
 
@@ -3016,10 +3035,11 @@ class ScienceData(L1Product):
             for i, det in enumerate(detector_indices_input):
                 attenuation += tot_trans[f"det-{det}"]
         else:
-            attenuation += tot_trans[f"det-{detector_indices_input}"]
+            attenuation += tot_trans[f"det-{int(detector_indices_input)}"]
 
         attenuation = attenuation / np.size(detector_indices_input)
 
+        print('ATTTENUATION = ', attenuation)
         print('att_shape=',attenuation.shape)
         print('att=',attenuation)
         np.save('/home/jmitchell/Documents/SOLER/case_studies/240310/data/reduced_data_subc/py_trans.npy',attenuation)
@@ -3045,23 +3065,26 @@ class ScienceData(L1Product):
         
         grid_transmission = get_grid_transmission(e_mids, detector_indices_input, flare_location)
 
+        print('grid_trans = ', grid_transmission)
+        print('grid_trans_shape = ', grid_transmission)
+
+        if len(detector_indices_input) == 1 and int(detector_indices_input) == 9:
+
+            print('pix_input = ',pixel_indices_input)
+            bkg_transmission_mean = np.nanmean(bkg_transmission[pixel_indices_input])
+            grid_transmission = np.broadcast_to(bkg_transmission_mean, (np.shape(grid_transmission)[0], 1))
+
 
 
         # if flare_location is not None:
         grid_transmission = grid_transmission.mean(axis=1)
 
-        np.save('/home/jmitchell/Documents/SOLER/case_studies/240310/data/reduced_data_subc/pyu_grid_fac.npy',grid_transmission)
         #     print('gts_shape = ',grid_transmission)
         # else:
         #     grid_transmission = grid_transmission[energy_final_index_values]
         
         srm = (drm_new * grid_transmission[:, None]) / ct_e_diff[None, :]
 
-        print('drm.shape =', drm.shape)
-        print('ph_energies.shape =', ph_energies.shape)
-        print('ct_energies.shape =', ct_energies.shape)
-        print('e_edges.shape =', e_edges.shape)
-        print('drm_new.shape =', np.array(drm_new).shape)
 
         return {"srm": srm, "ph_axis": ph_energies_clipped, "geo_area": area_scale*rcr_factor}
     
