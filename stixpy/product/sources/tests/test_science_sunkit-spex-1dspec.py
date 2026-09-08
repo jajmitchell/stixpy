@@ -282,7 +282,7 @@ def _assert_counts(spec, expected, variant):
     assert np.all(counts_err >= 0)
     if expected is not None:
         assert_allclose(counts, expected[variant]["counts"], rtol=1e-7)
-        assert_allclose(counts_err, expected[variant]["counts_err"], rtol=4e-4)
+        assert_allclose(counts_err, expected[variant]["counts_err"], rtol=3e-7)
 
 
 # ---------------------------------------------------------------------------

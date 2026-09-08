@@ -1216,8 +1216,6 @@ class ScienceData(L1Product):
         
         counts_var_bkg = np.sqrt(counts_bkg + counts_var_bkg) 
          
-
-
         counts_bkg = counts_bkg[:,detector_indices_bkg,:,:]
         counts_bkg = counts_bkg[:,:,pixel_indices_bkg,:]
         counts_bkg = counts_bkg[:,:,:,energy_indices_bkg]
@@ -1226,7 +1224,6 @@ class ScienceData(L1Product):
         counts_var_bkg = counts_var_bkg[:,:,pixel_indices_bkg,:]
         counts_var_bkg = counts_var_bkg[:,:,:,energy_indices_bkg]
 
-        print(counts_var_bkg.shape,livefrac_error_bkg.shape,livefrac_bkg.shape)
 
         livefrac_error_bkg = livefrac_error_bkg[:,detector_indices_bkg,:,:]
         livefrac_error_bkg = livefrac_error_bkg[:,:,pixel_indices_bkg,:]
@@ -1248,6 +1245,9 @@ class ScienceData(L1Product):
         counts_var_bkg = counts_var_bkg[:, :, pix_bkg_pos, :]
         if livefrac_error_bkg.shape[2] != 1:
             livefrac_error_bkg = livefrac_error_bkg[:, :, pix_bkg_pos, :]
+
+        if elut_cor_fac is not None:
+            counts_var_bkg = counts_var_bkg * elut_cor_fac
 
         counts_var_bkg = ScienceData._livetime_uncertainty(counts_var_bkg,livefrac_error_bkg,livefrac_bkg)
 
@@ -1273,6 +1273,7 @@ class ScienceData(L1Product):
         energies = product.energies
 
         counts_var = counts_var[:, :, pix, :]
+
         if livefrac_error.shape[2] != 1:
             livefrac_error = livefrac_error[:, :, pix, :]
 
@@ -1281,8 +1282,6 @@ class ScienceData(L1Product):
 
         counts_var = ScienceData._livetime_uncertainty(counts_var,livefrac_error,livefrac)   
 
-        # counts_var = np.sqrt(np.nansum(counts_var[:,:,pixel_indices,:]**2, axis=2,keepdims=True))
-        # counts_var_bkg = np.sqrt(np.nansum(counts_var_bkg[:,:,pixel_indices,:]**2, axis=2,keepdims=True))
 
         t_norm_bkg = bkg.data["timedel"]
         t_norm = t_norm.to(u.s)
@@ -1309,12 +1308,12 @@ class ScienceData(L1Product):
         count_rate_lvtcorr_bkg = counts_lvtcorr_bkg / t_norm_bkg.mean()
         count_lvtcorr_scaled_bkg = t_norm.reshape(len(t_norm), 1,1,1) * count_rate_lvtcorr_bkg
 
-        if elut_cor_fac is not None:
-            counts_var_lvtcorr = counts_var
-            counts_var_lvtcorr_bkg = (counts_var_bkg / livefrac_bkg) * elut_cor_fac
-        else:
-             counts_var_lvtcorr = (counts_var) 
-             counts_var_lvtcorr_bkg = (counts_var_bkg / livefrac_bkg)         
+        # if elut_cor_fac is not None:
+        #     counts_var_lvtcorr = counts_var
+        #     counts_var_lvtcorr_bkg = (counts_var_bkg / livefrac_bkg) * elut_cor_fac
+        # else:
+        counts_var_lvtcorr = (counts_var) 
+        counts_var_lvtcorr_bkg = (counts_var_bkg)         
 
         counts_var_lvtcorr_scaled_bkg = (counts_var_lvtcorr_bkg / t_norm_bkg.mean()) * t_norm.reshape(len(t_norm), 1,1,1)
 
@@ -2868,6 +2867,7 @@ class ScienceData(L1Product):
 
 
         if bkg:
+
             livetime_correction = True
 
             energy_indices_bkg = self._energies_bkg_sub(self,

@@ -259,7 +259,7 @@ def _assert_counts_err(result, expected, label):
     assert np.all(np.isfinite(counts_err))
     # assert np.all(counts_err >= 0)
     if expected is not None:
-        assert_allclose(counts_err, expected[label]["counts_err"], rtol=1e-4, atol=1e-4)
+        assert_allclose(counts_err, expected[label]["counts_err"], rtol=1e-6)
 
 
 # ---------------------------------------------------------------------------
