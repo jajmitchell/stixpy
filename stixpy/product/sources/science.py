@@ -1233,18 +1233,24 @@ class ScienceData(L1Product):
         
         livefrac_bkg = livefrac_bkg[:,detector_indices_bkg,:,:]
 
-        pix = np.asarray(pixel_indices)
-        if pix.ndim == 2:
-            pix = np.asarray(ScienceData._indices_expand_ranges(pix, nest=False))
-        pix = np.asarray(pix, dtype=int)
+        if len(shape) == 4:
+            pix = np.asarray(pixel_indices)
+            if pix.ndim == 2:
+                pix = np.asarray(ScienceData._indices_expand_ranges(pix, nest=False))
+            pix = np.asarray(pix, dtype=int)
 
-        # counts_var_bkg has already been sliced to pixel_indices_bkg, so map the
-        # requested pixels onto positions within that subset.
-        pix_bkg_pos = np.searchsorted(np.asarray(pixel_indices_bkg), pix)
+            # counts_var_bkg has already been sliced to pixel_indices_bkg, so map the
+            # requested pixels onto positions within that subset.
+            # pix_bkg_pos = np.searchsorted(np.asarray(pixel_indices_bkg), pix)
 
-        counts_var_bkg = counts_var_bkg[:, :, pix_bkg_pos, :]
-        if livefrac_error_bkg.shape[2] != 1:
-            livefrac_error_bkg = livefrac_error_bkg[:, :, pix_bkg_pos, :]
+            pix_bkg_pos = np.flatnonzero(np.isin(pixel_indices_bkg, pix))
+            if pix_bkg_pos.size != len(pix):
+                missing = np.setdiff1d(pix, pixel_indices_bkg)
+                raise ValueError(f"pixels {missing.tolist()}")
+
+            counts_var_bkg = counts_var_bkg[:, :, pix_bkg_pos, :]
+            if livefrac_error_bkg.shape[2] != 1:
+                livefrac_error_bkg = livefrac_error_bkg[:, :, pix_bkg_pos, :]
 
         if elut_cor_fac is not None:
             counts_var_bkg = counts_var_bkg * elut_cor_fac
@@ -1260,10 +1266,10 @@ class ScienceData(L1Product):
             livefrac_error = np.nanmean(livefrac_error,axis=(1,2), keepdims=True)
 
             counts_bkg = np.nansum(counts_bkg, axis=(1,2), keepdims=True)
-            counts_var_bkg = np.nansum(counts_var_bkg, axis=(1,2), keepdims=True)
+            counts_var_bkg = np.sqrt(np.nansum(counts_var_bkg**2, axis=(1, 2), keepdims=True))
 
             livefrac_bkg = np.nanmean(livefrac_bkg,axis=1, keepdims=True)
-            livefrac_error_bkg = np.nanmean(livefrac_error_bkg,axis=(1,2), keepdims=True)
+            livefrac_error_bkg = np.sqrt(np.nansum(livefrac_error_bkg**2, axis=(1, 2), keepdims=True))
 
         
         counts_var = np.sqrt(counts + counts_var) 
@@ -1272,16 +1278,17 @@ class ScienceData(L1Product):
         times = product.times
         energies = product.energies
 
-        counts_var = counts_var[:, :, pix, :]
 
-        if livefrac_error.shape[2] != 1:
-            livefrac_error = livefrac_error[:, :, pix, :]
+        if len(shape) == 4:
+            counts_var = counts_var[:, :, pix, :]
+
+            if livefrac_error.shape[2] != 1:
+                livefrac_error = livefrac_error[:, :, pix, :]
 
         if elut_cor_fac is not None:
             counts_var = (counts_var * elut_cor_fac)
 
         counts_var = ScienceData._livetime_uncertainty(counts_var,livefrac_error,livefrac)   
-
 
         t_norm_bkg = bkg.data["timedel"]
         t_norm = t_norm.to(u.s)
@@ -1308,10 +1315,7 @@ class ScienceData(L1Product):
         count_rate_lvtcorr_bkg = counts_lvtcorr_bkg / t_norm_bkg.mean()
         count_lvtcorr_scaled_bkg = t_norm.reshape(len(t_norm), 1,1,1) * count_rate_lvtcorr_bkg
 
-        # if elut_cor_fac is not None:
-        #     counts_var_lvtcorr = counts_var
-        #     counts_var_lvtcorr_bkg = (counts_var_bkg / livefrac_bkg) * elut_cor_fac
-        # else:
+
         counts_var_lvtcorr = (counts_var) 
         counts_var_lvtcorr_bkg = (counts_var_bkg)         
 
@@ -1350,74 +1354,84 @@ class ScienceData(L1Product):
             if elut_cor_fac is not None:
                 elut_cor_fac = elut_cor_fac[:-1]
 
-        detector_groups = None
-        if detector_indices.ndim == 2:
-            detector_groups = ScienceData._indices_expand_ranges(detector_indices, nest=True)   # list of per-group arrays
-            detector_indices = np.concatenate(detector_groups)                                   # flat — identical to nest=False
 
-        if pixel_indices.ndim == 2:
-            pixel_indices = ScienceData._indices_expand_ranges(pixel_indices, nest=False)
+        if len(shape) < 4:
 
-        # counts = spec_in_final
-
-        if sunkit_spex_detector_sum:
-
-            idx = np.ix_(detector_indices, pixel_indices)
-            
-            eff_livefrac = np.nanmean(livefrac[:, detector_indices, :, :],axis=1,keepdims=True)
-
-            spec_in_final = spec_in_corr * eff_livefrac
-            spec_in_err_final = spec_in_err * eff_livefrac
+            spec_in_final = spec_in_corr * livefrac
+            spec_in_err_final = spec_in_err * livefrac
 
             counts = spec_in_final
+            counts_var = spec_in_err_final 
 
-            counts_check = np.nansum(spec_in_final[:, idx[0], idx[1], :], axis=(1,2), keepdims=True)
-            # counts = np.where(counts_check < 0, 0, counts)
+        else:
+            detector_groups = None
+            if detector_indices.ndim == 2:
+                detector_groups = ScienceData._indices_expand_ranges(detector_indices, nest=True)   # list of per-group arrays
+                detector_indices = np.concatenate(detector_groups)                                   # flat — identical to nest=False
 
-            counts_var = spec_in_err_final
+            if pixel_indices.ndim == 2:
+                pixel_indices = ScienceData._indices_expand_ranges(pixel_indices, nest=False)
 
-            livefrac =  np.broadcast_to(eff_livefrac, counts.shape)
+            # counts = spec_in_final
 
+            if sunkit_spex_detector_sum:
 
-        else:  # sunkit_spex_detector_sum is False
+                idx = np.ix_(detector_indices, pixel_indices)
+                
+                eff_livefrac = np.nanmean(livefrac[:, detector_indices, :, :],axis=1,keepdims=True)
 
-            if detector_groups is None:
-                # ---- flat: genuinely per-detector/pixel, unchanged ----
-                eff_livefrac = np.nansum(spec_in_lvt, axis=3) / np.nansum(spec_in_corr_lvt, axis=3)
-                spec_in_final = spec_in_corr * eff_livefrac[..., None]
-                spec_in_err_final = spec_in_err * eff_livefrac[..., None]
-                counts = np.where(spec_in_final < 0, 0, spec_in_final)
-                counts_var = spec_in_err_final
-                livefrac = eff_livefrac[:, :, :, np.newaxis]
+                spec_in_final = spec_in_corr * eff_livefrac
+                spec_in_err_final = spec_in_err * eff_livefrac
 
-            else:
-                # ---- nested: each inner list is its own mini detector-sum ----
-                spec_in_final = spec_in_corr.copy()
-                spec_in_err_final = spec_in_err.copy()
-                eff_livefrac_full = np.full(
-                    (spec_in_lvt.shape[0], spec_in_lvt.shape[1], spec_in_lvt.shape[2], 1),
-                    np.nan,
-                )
-
-                for group_dets in detector_groups:
-                    gidx = np.ix_(group_dets, pixel_indices)
-
-                    # count-weighted ratio over THIS group's detectors + selected pixels,
-                    # exactly like the sum=True combined ratio but per group
-                    group_eff = np.nansum(spec_in_lvt[:, gidx[0], gidx[1], :], axis=(1, 2, 3), keepdims=True) \
-                            / np.nansum(spec_in_corr_lvt[:, gidx[0], gidx[1], :], axis=(1, 2, 3), keepdims=True)
-
-                    # write the group's single ratio onto every detector in the group
-                    # (all pixels), so _data_select's later per-group mean returns it unchanged
-                    eff_livefrac_full[:, group_dets, :, :] = group_eff
-
-                    spec_in_final[:, group_dets, :, :] = spec_in_corr[:, group_dets, :, :] * group_eff
-                    spec_in_err_final[:, group_dets, :, :] = spec_in_err[:, group_dets, :, :] * group_eff
-
-                # counts = np.where(spec_in_final < 0, 0, spec_in_final)
                 counts = spec_in_final
+
+                counts_check = np.nansum(spec_in_final[:, idx[0], idx[1], :], axis=(1,2), keepdims=True)
+                # counts = np.where(counts_check < 0, 0, counts)
+
                 counts_var = spec_in_err_final
-                livefrac = eff_livefrac_full
+
+                livefrac =  np.broadcast_to(eff_livefrac, counts.shape)
+
+
+            else:  # sunkit_spex_detector_sum is False
+
+                if detector_groups is None:
+                    # ---- flat: genuinely per-detector/pixel, unchanged ----
+                    eff_livefrac = np.nansum(spec_in_lvt, axis=3) / np.nansum(spec_in_corr_lvt, axis=3)
+                    spec_in_final = spec_in_corr * eff_livefrac[..., None]
+                    spec_in_err_final = spec_in_err * eff_livefrac[..., None]
+                    counts = np.where(spec_in_final < 0, 0, spec_in_final)
+                    counts_var = spec_in_err_final
+                    livefrac = eff_livefrac[:, :, :, np.newaxis]
+
+                else:
+                    # ---- nested: each inner list is its own mini detector-sum ----
+                    spec_in_final = spec_in_corr.copy()
+                    spec_in_err_final = spec_in_err.copy()
+                    eff_livefrac_full = np.full(
+                        (spec_in_lvt.shape[0], spec_in_lvt.shape[1], spec_in_lvt.shape[2], 1),
+                        np.nan,
+                    )
+
+                    for group_dets in detector_groups:
+                        gidx = np.ix_(group_dets, pixel_indices)
+
+                        # count-weighted ratio over THIS group's detectors + selected pixels,
+                        # exactly like the sum=True combined ratio but per group
+                        group_eff = np.nansum(spec_in_lvt[:, gidx[0], gidx[1], :], axis=(1, 2, 3), keepdims=True) \
+                                / np.nansum(spec_in_corr_lvt[:, gidx[0], gidx[1], :], axis=(1, 2, 3), keepdims=True)
+
+                        # write the group's single ratio onto every detector in the group
+                        # (all pixels), so _data_select's later per-group mean returns it unchanged
+                        eff_livefrac_full[:, group_dets, :, :] = group_eff
+
+                        spec_in_final[:, group_dets, :, :] = spec_in_corr[:, group_dets, :, :] * group_eff
+                        spec_in_err_final[:, group_dets, :, :] = spec_in_err[:, group_dets, :, :] * group_eff
+
+                    # counts = np.where(spec_in_final < 0, 0, spec_in_final)
+                    counts = spec_in_final
+                    counts_var = spec_in_err_final
+                    livefrac = eff_livefrac_full
 
         return counts, counts_var, t_norm, e_norm, livefrac,livefrac_error, elut_cor_fac, times, energies, rcr
                                                                        
@@ -1511,19 +1525,45 @@ class ScienceData(L1Product):
             counts = product.data['counts'].reshape(shape[0], 1, 1, shape[-1])
 
             # Need to average over the different triggers
-            triggers = product.data["triggers"] / 16
-            triggers_error = product.data["triggers"] / 16
+            # triggers = product.data["triggers"] / 16
+            # triggers_error = product.data["triggers"] / 16
 
-            triggers_lower = triggers - triggers_error
-            triggers_upper = triggers + triggers_error
+            # triggers = product.data["triggers"] / 16
+            # triggers_error = np.sqrt(
+            #     product.data["triggers_comp_err"] ** 2 + product.data["triggers"]
+            # ) / 16
 
-            livefrac,_, _ = get_livetime_fraction(triggers / product.data["timedel"].to("s"))
-            livefrac_lower,_, _ = get_livetime_fraction(triggers_lower / product.data["timedel"].to("s"))
-            livefrac_upper,_, _ = get_livetime_fraction(triggers_upper / product.data["timedel"].to("s"))
+            # triggers_lower = np.floor(np.maximum(triggers - triggers_error, 0)) # This brings in line with IDL precision, if removed then the ratio at livefrac of ~0.5 goes to 0.0002, rather than ~1e-7.
+            # triggers_upper = np.floor(triggers + triggers_error)  # This brings in line with IDL precision, if removed then the ratio at livefrac of ~0.5 goes to 0.0002, rather than ~1e-7.
+
+            # livefrac,_, _ = get_livetime_fraction(triggers / product.data["timedel"].to("s"))
+            # livefrac_lower,_, _ = get_livetime_fraction(triggers_lower / product.data["timedel"].to("s"))
+            # livefrac_upper,_, _ = get_livetime_fraction(triggers_upper / product.data["timedel"].to("s"))
             
+            # livefrac = livefrac.reshape(livefrac.shape + (1, 1, 1))
+            # livefrac_lower = livefrac_lower.reshape(livefrac_lower.shape + (1, 1, 1))
+            # livefrac_upper = livefrac_upper.reshape(livefrac_upper.shape + (1, 1, 1))
+
+
+            trig_raw = product.data["triggers"] / 16
+            trig_err = np.sqrt(
+                product.data["triggers_comp_err"] ** 2 + product.data["triggers"]
+            ) / 16
+
+            triggers = np.floor(trig_raw)
+            triggers_lower = np.floor(np.maximum(trig_raw - trig_err, 0))
+            triggers_upper = np.floor(trig_raw + trig_err)
+
+            timedel = product.data["timedel"].to("s")
+
+            livefrac, _, _ = get_livetime_fraction(triggers / timedel)
+            livefrac_lower, _, _ = get_livetime_fraction(triggers_lower / timedel)
+            livefrac_upper, _, _ = get_livetime_fraction(triggers_upper / timedel)
+
             livefrac = livefrac.reshape(livefrac.shape + (1, 1, 1))
             livefrac_lower = livefrac_lower.reshape(livefrac_lower.shape + (1, 1, 1))
             livefrac_upper = livefrac_upper.reshape(livefrac_upper.shape + (1, 1, 1))
+
 
         else:
 
@@ -1569,39 +1609,46 @@ class ScienceData(L1Product):
                 counts = counts * elut_cor_fac
 
         # ---- resolve the pixel summation group ------------------------------
-        n_pix = counts.shape[2]
-
-        if pixel_indices is None:
-            pix = np.arange(n_pix)
+        
+        if len(shape) < 4:
+        
+            livefrac_error = ((counts / livefrac_lower) -   (counts/ livefrac_upper)) / 2
+            
         else:
-            pix = np.asarray(pixel_indices)
-            if pix.ndim == 2:
-                # nest=False to match _data_select line 1227 and
-                # _elut_correction_sort line 2528: pixel ranges are flattened into a
-                # single summation group. (Detector ranges use nest=True, but livefrac
-                # is already per-detector so that does not apply here.)
-                pix = np.asarray(ScienceData._indices_expand_ranges(pix, nest=False))
+
+            n_pix = counts.shape[2]
+
+            if pixel_indices is None:
+                pix = np.arange(n_pix)
             else:
-                pix = pix.ravel()
+                pix = np.asarray(pixel_indices)
+                if pix.ndim == 2:
+                    # nest=False to match _data_select line 1227 and
+                    # _elut_correction_sort line 2528: pixel ranges are flattened into a
+                    # single summation group. (Detector ranges use nest=True, but livefrac
+                    # is already per-detector so that does not apply here.)
+                    pix = np.asarray(ScienceData._indices_expand_ranges(pix, nest=False))
+                else:
+                    pix = pix.ravel()
 
-        pix = np.asarray(pix, dtype=int)
+            pix = np.asarray(pix, dtype=int)
 
-        # ---- distribute the correlated livetime error over pixels -----------
-        # The livetime error is a systematic shared by every pixel of a detector, so
-        # its true total is the linear term evaluated on the pixel-summed counts.
-        # Spreading it as e_tot * sqrt(w_p), with w_p = C_p / C_tot summing to 1,
-        # means a downstream quadrature sum over the pixel axis returns e_tot exactly.
-        c_g = counts[:, :, pix, :]
-        c_tot = np.nansum(c_g, axis=2, keepdims=True)
-        e_tot = (c_tot / livefrac_lower - c_tot / livefrac_upper) / 2
+            # ---- distribute the correlated livetime error over pixels -----------
+            # The livetime error is a systematic shared by every pixel of a detector, so
+            # its true total is the linear term evaluated on the pixel-summed counts.
+            # Spreading it as e_tot * sqrt(w_p), with w_p = C_p / C_tot summing to 1,
+            # means a downstream quadrature sum over the pixel axis returns e_tot exactly.
+            c_g = counts[:, :, pix, :]
+            c_tot = np.nansum(c_g, axis=2, keepdims=True)
+            e_tot = (c_tot / livefrac_lower - c_tot / livefrac_upper) / 2
 
-        c_fin = np.where(np.isfinite(c_g), np.abs(c_g), 0)
-        with np.errstate(invalid="ignore", divide="ignore"):
-            w = c_fin / np.nansum(c_fin, axis=2, keepdims=True)
-        w = np.where(np.isfinite(w), w, 1 / pix.size)
+            c_fin = np.where(np.isfinite(c_g), np.abs(c_g), 0)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                w = c_fin / np.nansum(c_fin, axis=2, keepdims=True)
+            w = np.where(np.isfinite(w), w, 1 / pix.size)
 
-        livefrac_error = np.zeros(counts.shape) * counts.unit
-        livefrac_error[:, :, pix, :] = e_tot * np.sqrt(w)
+            livefrac_error = np.zeros(counts.shape) * counts.unit
+            livefrac_error[:, :, pix, :] = e_tot * np.sqrt(w)
 
         return livefrac, livefrac_error
 
@@ -1897,11 +1944,14 @@ class ScienceData(L1Product):
 
         if flare_location is not None:
             flare_location_stx = np.array([flare_location['stx'].Tx.value, flare_location['stx'].Ty.value])
+            if flare_angle is None:
+                flare_angle = product._flare_angle(product,flare_location)
         else:
             flare_location_stx = None
+            flare_angle = None
 
-        if flare_angle is None:
-            flare_angle = product._flare_angle(product,flare_location)
+        # if flare_angle is None:
+        #     flare_angle = product._flare_angle(product,flare_location)
 
         distance = (product.meta["DSUN_OBS"] * u.m).to(u.AU)
         rcr_unique = np.unique(rcr)
@@ -2699,36 +2749,49 @@ class ScienceData(L1Product):
                               bins_actual,
                               sunkit_spex_detector_sum,
                               pixel_indices,
-                              detector_indices):
+                              detector_indices,
+                              spec_file):
         """
         """
-
-        if pixel_indices.ndim ==2:
-            pixel_indices = ScienceData._indices_expand_ranges(pixel_indices, nest=False)
         
-        bins = np.nanmean(bins[:,:,pixel_indices,:],axis=2,keepdims=True)
-        bins_actual = np.nanmean(bins_actual[:,:,pixel_indices,:],axis=2,keepdims=True)
+        if spec_file:
 
-        if sunkit_spex_detector_sum == True:
+            bins = np.nanmean(bins[:,:,pixel_indices,:],axis=2,keepdims=True)
+            bins_actual = np.nanmean(bins_actual[:,:,pixel_indices,:],axis=2,keepdims=True)
             
-            if detector_indices.ndim ==2:
-                detector_indices = ScienceData._indices_expand_ranges(detector_indices, nest=False)
-
             bins = np.nanmean(bins[:,detector_indices,:,:],axis=1,keepdims=True)
-
             bins_actual = np.nanmean(bins_actual[:,detector_indices,:,:],axis=1,keepdims=True)
 
             elut_cor_fac = bins / bins_actual
 
-        elif detector_indices.ndim == 1:
+        else:
 
-            elut_cor_fac = bins / bins_actual
-        
-        elif detector_indices.ndim == 2:
+            if pixel_indices.ndim ==2:
+                pixel_indices = ScienceData._indices_expand_ranges(pixel_indices, nest=False)
+
+            bins = np.nanmean(bins[:,:,pixel_indices,:],axis=2,keepdims=True)
+            bins_actual = np.nanmean(bins_actual[:,:,pixel_indices,:],axis=2,keepdims=True)
+
+            if sunkit_spex_detector_sum == True:
+                
+                if detector_indices.ndim ==2:
+                    detector_indices = ScienceData._indices_expand_ranges(detector_indices, nest=False)
+
+                bins = np.nanmean(bins[:,detector_indices,:,:],axis=1,keepdims=True)
+
+                bins_actual = np.nanmean(bins_actual[:,detector_indices,:,:],axis=1,keepdims=True)
+
+                elut_cor_fac = bins / bins_actual
+
+            elif detector_indices.ndim == 1:
+
+                elut_cor_fac = bins / bins_actual
             
-            detector_indices = ScienceData._indices_expand_ranges(detector_indices, nest=True)
+            elif detector_indices.ndim == 2:
+                
+                detector_indices = ScienceData._indices_expand_ranges(detector_indices, nest=True)
 
-            elut_cor_fac = ScienceData._normalize_elut_by_group_detector_mean(bins, bins_actual, detector_indices)
+                elut_cor_fac = ScienceData._normalize_elut_by_group_detector_mean(bins, bins_actual, detector_indices)
 
 
         return elut_cor_fac
@@ -2851,12 +2914,24 @@ class ScienceData(L1Product):
             _, _, bins, bins_actual = get_elut_correction(np.array(self.energies["channel"]), 
                                                        self)
             
+            print('bas = ',  bins_actual.shape)
+            print('bs = ',  bins.shape)
+
+            if len(self.data["counts"].shape) < 4:
+                detector_indices_elut = np.where(self.detector_masks.__dict__["masks"] == 1)[1]
+                pixel_indices_elut = np.where(self.pixel_masks.__dict__["masks"] == 1)[1]
+                spec_file = True
+            else:
+                detector_indices_elut = detector_indices
+                pixel_indices_elut = pixel_indices
+                spec_file = False
 
             elut_cor_fac = ScienceData._elut_correction_sort(bins, 
                                                             bins_actual,
                                                             sunkit_spex_detector_sum,
-                                                            pixel_indices,
-                                                            detector_indices)
+                                                            pixel_indices_elut,
+                                                            detector_indices_elut,
+                                                            spec_file)
             
             warnings.warn('ELUT correction factor is always averaged over the used pixels'\
                           'but can be given detector-wise or detector averaged.')

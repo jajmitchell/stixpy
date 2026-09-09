@@ -82,17 +82,23 @@ def get_elut_correction(e_ind, pixel_data):
 
     bins = ebin_sci_edges_high - ebin_sci_edges_low
 
-    det_indices = np.where(pixel_data.detector_masks.__dict__["masks"] == 1)[1]
-    pix_indices = np.where(pixel_data.pixel_masks.__dict__["masks"] == 1)[1]
+    # det_indices = np.where(pixel_data.detector_masks.__dict__["masks"] == 1)[1]
+    # pix_indices = np.where(pixel_data.pixel_masks.__dict__["masks"] == 1)[1]
 
-    bins_reshape = bins.reshape(1, 1, 1, len(bins))
-    bins_expand = np.broadcast_to(bins_reshape,(1,len(det_indices),len(pix_indices),len(bins)))
-    ebin_widths = np.broadcast_to(ebin_widths,(1,ebin_widths.shape[0],ebin_widths.shape[1],ebin_widths.shape[2]))
+    # bins_reshape = bins.reshape(1, 1, 1, len(bins))
+    # bins_expand = np.broadcast_to(bins_reshape,(1,len(det_indices),len(pix_indices),len(bins)))
+    # ebin_widths = np.broadcast_to(ebin_widths,(1,ebin_widths.shape[0],ebin_widths.shape[1],ebin_widths.shape[2]))
 
-    ebin_widths = ebin_widths[:,:,pix_indices,:]
-    ebin_widths = ebin_widths[:,det_indices,:,:]
+    # ebin_widths = ebin_widths[:,:,pix_indices,:]
+    # ebin_widths = ebin_widths[:,det_indices,:,:]
 
-    return e_cor_high, e_cor_low, bins_expand, ebin_widths
+    bins = ebin_sci_edges_high - ebin_sci_edges_low
+
+    n_energy = bins.shape[-1]
+    bins_expand = np.broadcast_to(bins.reshape(1, 1, 1, n_energy), (1, 32, 12, n_energy))
+    bins_actual = ebin_widths[np.newaxis, ...]
+
+    return e_cor_high, e_cor_low, bins_expand, bins_actual
 
 
 
