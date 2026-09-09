@@ -863,6 +863,8 @@ class ScienceData(L1Product):
             counts, counts_var, livefrac = ScienceData._apply_livetime(counts, counts_var, livefrac, groups)
             counts = np.nansum(counts,axis=2,keepdims=True)
 
+
+
         if detector_indices is not None:
 
             detector_indices = np.asarray(detector_indices)   # "top24" must already be resolved to indices upstream
@@ -922,165 +924,34 @@ class ScienceData(L1Product):
             #   output bin is the sum over remaining detector AND pixel axes.
             # sunkit_spex_detector_sum=False -> each detector stays its own output
             #   bin, so only the pixel axis is pooled.
-            sum_axes = (1, 2) if sunkit_spex_detector_sum else (2,)
+        sum_axes = (1, 2) if sunkit_spex_detector_sum else (2,)
+
+        total = np.nansum(counts, axis=sum_axes, keepdims=True)
+        counts = np.where(total < 0, 0, counts.value) * counts.unit
+
+        if systematic:
+            e_mean = ((energies["e_low"] + energies["e_high"]) / 2).value
+            systematic_err_percentage = np.select(
+                [e_mean < 7, (e_mean < 10) & (e_mean >= 7), e_mean >= 10],
+                [0.07, 0.05, 0.03],
+            )
 
             total = np.nansum(counts, axis=sum_axes, keepdims=True)
-            counts = np.where(total < 0, 0, counts.value) * counts.unit
 
-            if systematic:
-                e_mean = ((energies["e_low"] + energies["e_high"]) / 2).value
-                systematic_err_percentage = np.select(
-                    [e_mean < 7, (e_mean < 10) & (e_mean >= 7), e_mean >= 10],
-                    [0.07, 0.05, 0.03],
-                )
+            # Divisor taken from counts_var, not counts: these are the axes that
+            # actually get quadrature-summed downstream. On the bkgsub path
+            # counts_var's pixel axis is already collapsed while counts' is not,
+            # so sizing off counts would mis-scale by sqrt(n_pix). Spreading
+            # p*total over n_elem slots as p*total/sqrt(n_elem) means the
+            # downstream quadrature sum returns exactly p*total.
+            n_elem = int(np.prod([counts_var.shape[a] for a in sum_axes]))
+            sys_err_elem = (systematic_err_percentage * total) / np.sqrt(n_elem)
 
-                total = np.nansum(counts, axis=sum_axes, keepdims=True)
+            counts_var = np.sqrt(
+                counts_var.value**2
+                + np.broadcast_to(sys_err_elem.value, counts_var.shape) ** 2
+            ) * u.ct
 
-                # Divisor taken from counts_var, not counts: these are the axes that
-                # actually get quadrature-summed downstream. On the bkgsub path
-                # counts_var's pixel axis is already collapsed while counts' is not,
-                # so sizing off counts would mis-scale by sqrt(n_pix). Spreading
-                # p*total over n_elem slots as p*total/sqrt(n_elem) means the
-                # downstream quadrature sum returns exactly p*total.
-                n_elem = int(np.prod([counts_var.shape[a] for a in sum_axes]))
-                sys_err_elem = (systematic_err_percentage * total) / np.sqrt(n_elem)
-
-                counts_var = np.sqrt(
-                    counts_var.value**2
-                    + np.broadcast_to(sys_err_elem.value, counts_var.shape) ** 2
-                ) * u.ct
-
-        # if detector_indices is not None:
-
-        #     detector_indices = np.asarray(detector_indices)   # "top24" must already be resolved to indices upstream
-
-        #     if systematic:
-        #         e_low = energies["e_low"].value
-        #         e_high = energies["e_high"].value
-        #         e_mean = e_low + ((e_high - e_low)/2)
-        #         systematic_err_percentage = np.select(
-        #             [e_mean < 7, (e_mean < 10) & (e_mean >= 7), e_mean  >= 10],
-        #             [0.07, 0.05, 0.03],
-        #         )
-
-        #         if sunkit_spex_detector_sum:
-        #             # -------- CASE A: sum=True --------
-        #             # All selected detectors are one combined entity. Derive from the
-        #             # GRAND total over the full selected set and spread evenly, so that
-        #             # flat "top24" and any nested partition of the same 24 detectors
-        #             # reconcile to the identical number once bins are quadrature-combined
-        #             # downstream. (This is the existing behaviour.)
-        #             if detector_indices.ndim == 1:
-        #                 all_selected = detector_indices
-        #             else:
-        #                 all_selected = np.concatenate([np.arange(dl, dh + 1) for dl, dh in detector_indices])
-
-        #             # n_total = len(all_selected) * counts.shape[2]           # detectors × remaining pixels
-
-        #             cv_sel = counts_var[:, all_selected, :, :]
-        #             n_total = cv_sel.shape[1] * cv_sel.shape[2]
-        #             grand_total = counts[:, all_selected, :, :].sum(axis=(1, 2), keepdims=True)       # detectors × remaining pixels
-        #             grand_total = np.where(grand_total < 0, 0, grand_total)
-
-        #             sys_err_total = systematic_err_percentage * grand_total
-        #             sys_err_elem = sys_err_total / np.sqrt(n_total)
-
-        #             sys_err_full = np.broadcast_to(
-        #                 sys_err_elem.value, counts_var[:, all_selected, :, :].shape
-        #             ) * sys_err_elem.unit
-                    
-        #             # print('cts_var = ',counts_var.shape)
-        #             # print('sys_err')
-
-        #             counts_var[:, all_selected, :, :] = np.sqrt(
-        #                 counts_var[:, all_selected, :, :].value**2 + sys_err_full.value**2
-        #             ) * u.ct
-
-        #         else:
-        #             # -------- CASE B: sum=False --------
-        #             # Each OUTPUT bin carries a systematic derived from ITS OWN counts.
-        #             if detector_indices.ndim == 1:
-        #                 # Flat: each detector stays its own bin (no detector collapse),
-        #                 # so apply p × (that detector's own pixel-summed counts). Spread
-        #                 # over the pixel axis by sqrt(n_pix) so downstream pixel pooling
-        #                 # reconstructs it; if pixels are already pooled n_pix==1 and this
-        #                 # is just p × count.
-        #                 n_pix = counts.shape[2]
-        #                 det_total = counts[:, detector_indices, :, :].sum(axis=2, keepdims=True)
-        #                 sys_err_elem = (systematic_err_percentage * det_total) / np.sqrt(n_pix)
-
-        #                 sys_err_full = np.broadcast_to(
-        #                     sys_err_elem.value, counts[:, detector_indices, :, :].shape
-        #                 ) * sys_err_elem.unit
-
-        #                 cv_sel = counts_var[:, detector_indices, :, :]
-        #                 counts_var[:, detector_indices, :, :] = np.sqrt(
-        #                     cv_sel.value**2 + sys_err_full.value**2
-        #                 ) * u.ct
-
-        #             else:
-        #                 # Nested: each group collapses to one bin, so derive from THAT
-        #                 # GROUP's own total and spread by sqrt(n_group) so the group's
-        #                 # quadrature collapse reconstructs p × group_total for that group.
-        #                 for dl, dh in detector_indices:
-        #                     n_group = (dh - dl + 1) * counts_var.shape[2]
-        #                     group_total = counts[:, dl:dh + 1, :, :].sum(axis=(1, 2), keepdims=True)
-
-        #                     sys_err_total = systematic_err_percentage * group_total
-        #                     sys_err_elem = sys_err_total / np.sqrt(n_group)
-
-        #                     sys_err_full = np.broadcast_to(
-        #                         sys_err_elem.value, counts_var[:, dl:dh + 1, :, :].shape
-        #                     ) * sys_err_elem.unit
-
-        #                     counts_var[:, dl:dh + 1, :, :] = np.sqrt(
-        #                         counts_var[:, dl:dh + 1, :, :].value**2 + sys_err_full.value**2
-        #                     ) * u.ct
-
-
-        #     # if not bkg and livefrac is not None and sunkit_spex_detector_sum:
-        #     if not bkg and livefrac is not None:
-        #         if detector_indices.ndim == 1:
-        #             groups = [detector_indices]                          # all selected -> one spectrum
-        #         else:  # ndim == 2 : each (dl, dh) range -> one output spectrum
-        #             groups = [np.arange(dl, dh + 1) for dl, dh in detector_indices]
-                
-        #         counts_var = ScienceData._livetime_uncertainty(counts_var,livefrac_error,livefrac)
-        #         counts, counts_var, livefrac = ScienceData._apply_livetime(counts, counts_var, livefrac, groups)
-        #         counts = np.nansum(counts,axis=2,keepdims=True)
-
-
-        #     if detector_indices.ndim == 1:
-        #         detector_mask = np.full(32, False)
-        #         detector_mask[detector_indices] = True
-        #         counts = counts[:, detector_mask, ...]
-        #         if bkg:
-        #             counts_var = counts_var[:, detector_mask, ...]
-        #         if livefrac is not None:
-        #             livefrac = livefrac[:, detector_mask, :, :]
-        #         if livefrac_error is not None:
-        #             livefrac_error = livefrac_error[:, detector_mask, :, :]
-
-        #     if detector_indices.ndim == 2:
-        #         counts = np.hstack(
-        #             [np.sum(counts[:, dl:dh + 1, ...], axis=1, keepdims=True) for dl, dh in detector_indices]
-        #         )
-        #         counts_var = np.concatenate(
-        #             [np.sqrt(np.sum(counts_var[:, dl:dh + 1, ...]**2, axis=1, keepdims=True)) for dl, dh in detector_indices],
-        #             axis=1,
-        #         )
-        #         if livefrac is not None:
-        #             livefrac = np.concatenate(
-        #                 [np.mean(livefrac[:, dl:dh + 1, ...], axis=1, keepdims=True) for dl, dh in detector_indices],
-        #                 axis=1,
-        #             )
-        #         if livefrac_error is not None:
-        #             livefrac_error = np.concatenate(
-        #                 [np.sqrt(np.mean(livefrac_error[:, dl:dh + 1, ...]**2, axis=1, keepdims=True)) for dl, dh in detector_indices],
-        #                 axis=1,
-        #             )
-
-        # counts = np.where(counts < 0, 0, counts)
 
         if time_indices is not None:
             time_indices = np.asarray(time_indices)
