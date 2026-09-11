@@ -1766,7 +1766,8 @@ class ScienceData(L1Product):
                     systematic,
                     detector_sum=True,
                     rcr=None,
-                    bkg=False):
+                    bkg=False,
+                    srm_e_min=3.5*u.keV):
         """
         Convert selected science data into one or more `sunkit_spex` spectral
         products (a single `Spectrum`, an `NDCubeSequence` of spectra, or an
@@ -1846,7 +1847,8 @@ class ScienceData(L1Product):
                 srm_dict = product.get_masked_srm(flare_location=flare_location_stx,
                                             detector_indices_input=detector_indices_srm, 
                                             pixel_indices_input=pixel_indices_srm,
-                                            rcr=rcr_unique[0])
+                                            rcr=rcr_unique[0],
+                                            srm_e_min=srm_e_min)
 
                 return ScienceData._return_spec_object(case,
                             sci_data,
@@ -1869,6 +1871,7 @@ class ScienceData(L1Product):
                         detector_indices_input=detector_indices_srm,
                         pixel_indices_input=pixel_indices_srm,
                         rcr=rcr_val,
+                        srm_e_min=srm_e_min
                     )
                     for rcr_val in rcr_unique
                 }
@@ -1921,7 +1924,8 @@ class ScienceData(L1Product):
 
                     srm_dict = product.get_masked_srm(flare_location=flare_location_stx,
                                             detector_indices_input=detector_indices_srm[i], 
-                                            pixel_indices_input=pixel_indices_srm,rcr=rcr_unique)
+                                            pixel_indices_input=pixel_indices_srm,rcr=rcr_unique,
+                                            srm_e_min=srm_e_min)
 
                     counts, counts_uncertainity, t_norm, e_norm, livefrac,_, elut_cor_fac, times_full, energies, rcr = sci_data
 
@@ -1969,6 +1973,7 @@ class ScienceData(L1Product):
                             detector_indices_input=detector_indices_srm[i],
                             pixel_indices_input=pixel_indices_srm,
                             rcr=rcr_val,
+                            srm_e_min=srm_e_min
                         )
                         for rcr_val in rcr_unique
                     }
@@ -2684,7 +2689,8 @@ class ScienceData(L1Product):
         flare_angle=None,
         bkg=None,
         sunkit_spex_systematic_error=False,
-        sunkit_spex_detector_sum=True
+        sunkit_spex_detector_sum=True,
+        srm_e_min=3.5*u.keV
     ):
     
         r"""
@@ -2767,7 +2773,13 @@ class ScienceData(L1Product):
         # =====================================================
         # elut
         # =====================================================
-
+        
+        if isinstance(srm_e_min, bool):
+            srm_e_min = 3.5 * u.keV if srm_e_min else None
+        elif isinstance(srm_e_min, u.Quantity):
+            srm_e_min = srm_e_min.to(u.keV)
+        elif srm_e_min is not None:
+            srm_e_min = float(srm_e_min) * u.keV
 
 
         if energy_indices is not None:
@@ -2935,7 +2947,8 @@ class ScienceData(L1Product):
                                                         systematic=sunkit_spex_systematic_error,
                                                         detector_sum=sunkit_spex_detector_sum,
                                                         rcr=rcr,
-                                                        bkg=background_boolean)
+                                                        bkg=background_boolean,
+                                                        srm_e_min=srm_e_min)
 
             return sunkit_spex_spectrum
         
@@ -2972,7 +2985,7 @@ class ScienceData(L1Product):
             return counts, counts_var, t_norm, e_norm, livefrac, livefrac_error, elut_cor_fac, times, energies, rcr
 
         
-    def get_masked_srm(self, flare_location, detector_indices_input, pixel_indices_input, rcr):
+    def get_masked_srm(self, flare_location, detector_indices_input, pixel_indices_input, rcr, srm_e_min=3.5*u.keV):
 
         """
         Build a spectral response matrix (SRM) masked/scaled for a given flare
@@ -3008,7 +3021,9 @@ class ScienceData(L1Product):
         ph_energies = np.array(Table.read(PATH_DRM,hdu=2)['DRM'])
         ct_energies = np.array(Table.read(PATH_DRM,hdu=3)['DRM'])
     
-    
+        detector_indices_input = np.atleast_1d(detector_indices_input)
+        pixel_indices_input = np.atleast_1d(pixel_indices_input)        
+
         energies = self.energies
 
         e_low = np.array(energies["e_low"])
@@ -3097,7 +3112,7 @@ class ScienceData(L1Product):
         
         grid_transmission = get_grid_transmission(e_mids, detector_indices_input, flare_location)
 
-        if len(detector_indices_input) == 1 and int(detector_indices_input) == 9:
+        if detector_indices_input.size == 1 and detector_indices_input[0] == 9:
             bkg_transmission = Table.read(PATH_BKG_TRANS, format="ascii.no_header", comment="[;~]")["col1"]
             bkg_transmission_mean = np.nanmean(bkg_transmission[pixel_indices_input])
             grid_transmission = np.broadcast_to(bkg_transmission_mean, (np.shape(grid_transmission)[0], 1))
@@ -3106,6 +3121,21 @@ class ScienceData(L1Product):
         grid_transmission = grid_transmission.mean(axis=1)
         
         srm = (drm_new * grid_transmission[:, None]) / ct_e_diff[None, :]
+
+        if srm_e_min is True:
+            srm_e_min = 3.5*u.keV
+        elif srm_e_min is False:
+            srm_e_min = None
+
+        if srm_e_min is not None:
+            # ph_energies_clipped holds bin EDGES (one longer than the SRM's row
+            # count), so find the cut on the lower edges and apply to both.
+            lower = (ph_energies_clipped[:-1]
+                     if ph_energies_clipped.size == srm.shape[0] + 1
+                     else ph_energies_clipped)
+            i0 = int(np.searchsorted(lower, srm_e_min.value, side="left"))
+            srm = srm[i0:]
+            ph_energies_clipped = ph_energies_clipped[i0:]
 
 
         return {"srm": srm, "ph_axis": ph_energies_clipped, "geo_area": area_scale*rcr_factor}
